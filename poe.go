@@ -95,14 +95,21 @@ func (c *Client) SendMessage(chatbot, message string, withChatBreak bool, timeou
 	}
 
 	chatID := c.getBotByCodename(chatbot)["chatId"].(float64)
-	messageData := c.sendQuery("SendMessageMutation", map[string]interface{}{
-		"bot":           chatbot,
-		"query":         message,
-		"chatId":        chatID,
-		"source":        nil,
-		"clientNonce":   generateNonce(16),
-		"sdid":          c.deviceID,
-		"withChatBreak": withChatBreak,
+	//messageData :=
+	messageData := c.sendQuery("chatHelpers_sendMessageMutation_Mutation", &Message{
+		ChatID: chatID,
+		Bot:    chatbot,
+		Query:  message,
+		Source: Source{
+			SourceType: "chat_input",
+			ChatInputMetadata: map[string]interface{}{
+				"useVoiceRecord": false,
+			},
+		},
+		WithChatBreak: withChatBreak,
+		ClientNonce:   generateNonce(16),
+		Sdid:          c.deviceID,
+		Attachments:   []interface{}{},
 	}, 0)
 
 	if messageData["data"].(map[string]interface{})["messageEdgeCreate"].(map[string]interface{})["message"] == nil {
@@ -420,6 +427,7 @@ func (c *Client) setupConnection() {
 func (c *Client) getDeviceID() string {
 	userID := c.viewer["poeUser"].(map[string]interface{})["id"].(string)
 	deviceID := getSavedDeviceID(userID)
+	log.Printf("Device ID: %s", deviceID)
 	return deviceID
 }
 
@@ -628,7 +636,7 @@ func (c *Client) getWebsocketURL(channel map[string]interface{}) string {
 	return fmt.Sprintf("wss://%s.tch.%s/up/%s/updates?min_seq=%s&channel=%s&hash=%s", c.wsDomain, baseHost, boxName, minSeq, channelName, hash)
 }
 
-func (c *Client) sendQuery(queryName string, variables map[string]interface{}, attempts int) map[string]interface{} {
+func (c *Client) sendQuery(queryName string, variables interface{}, attempts int) map[string]interface{} {
 	if attempts == 0 {
 		attempts = 10
 	}
@@ -636,7 +644,7 @@ func (c *Client) sendQuery(queryName string, variables map[string]interface{}, a
 		jsonData := generatePayload(queryName, variables)
 		payload, _ := json.Marshal(jsonData)
 
-		baseString := string(payload) + c.gqlHeaders["Poe-Formkey"][0] + "WpuLMiXEKKE98j56k"
+		baseString := string(payload) + c.gqlHeaders["Poe-Formkey"][0] + "Jb1hi3fg1MxZpzYfy"
 
 		headers := map[string][]string{
 			"Content-Type": {"application/json"},
@@ -668,6 +676,7 @@ func (c *Client) sendQuery(queryName string, variables map[string]interface{}, a
 		err = json.Unmarshal(body, &data)
 
 		if data["data"] == nil {
+			log.Println(string(payload))
 			log.Printf("%s returned an error: %s | Retrying (%d/%d)\n", queryName, data["errors"].([]interface{})[0].(map[string]interface{})["message"].(string), i+1, attempts)
 			time.Sleep(2 * time.Second)
 			continue
@@ -681,8 +690,8 @@ func (c *Client) sendQuery(queryName string, variables map[string]interface{}, a
 
 func (c *Client) subscribe() map[string]interface{} {
 	log.Println("Subscribing to mutations")
-	var result = c.sendQuery("subscriptionsMutation", map[string]interface{}{
-		"subscriptions": []Subscription{
+	var result = c.sendQuery("subscriptionsMutation", &SubscriptionsMutation{
+		Subscriptions: []Subscription{
 			{
 				SubscriptionName: "messageAdded",
 				Query:            nil,
@@ -702,6 +711,11 @@ func (c *Client) subscribe() map[string]interface{} {
 				SubscriptionName: "viewerStateUpdated",
 				Query:            nil,
 				QueryHash:        "ee640951b5670b559d00b6928e20e4ac29e33d225237f5bdfcb043155f16ef54",
+			},
+			{
+				SubscriptionName: "messageLimitUpdated",
+				Query:            nil,
+				QueryHash:        "38a2aada35e6cf3c47d9062c84533373cad2ec9205b37919a4ba8e5386115a17",
 			},
 			{
 				SubscriptionName: "chatTitleUpdated",
@@ -795,27 +809,34 @@ func (c *Client) onMessage(msg []byte) {
 		if messageData["message_type"].(string) != "subscriptionUpdate" {
 			continue
 		}
+		//t, err1 := json.Marshal(messageData)
+		//if err1 != nil {
+		//	log.Printf("wwwww")
+		//}
+		//log.Printf(string(t))
+		// 先判断是否有messageAdded
+		//var message map[string]interface{}
+		if messageData["payload"].(map[string]interface{})["data"].(map[string]interface{})["messageAdded"] != nil {
+			message := messageData["payload"].(map[string]interface{})["data"].(map[string]interface{})["messageAdded"].(map[string]interface{})
+			copiedDict := make(map[string]float64)
+			c.activeMessages.Range(func(key string, value float64) bool {
+				copiedDict[key] = value
+				return true
+			})
 
-		message := messageData["payload"].(map[string]interface{})["data"].(map[string]interface{})["messageAdded"].(map[string]interface{})
-
-		copiedDict := make(map[string]float64)
-		c.activeMessages.Range(func(key string, value float64) bool {
-			copiedDict[key] = value
-			return true
-		})
-
-		for key, value := range copiedDict {
-			queue, ok := c.messageQueues.Load(key)
-			if !ok {
-				continue
-			}
-			if value == message["messageId"].(float64) {
-				queue <- message
-				return
-			} else if key != "pending" && value == 0 && message["state"].(string) != "complete" {
-				c.activeMessages.Store(key, message["messageId"].(float64))
-				queue <- message
-				return
+			for key, value := range copiedDict {
+				queue, ok := c.messageQueues.Load(key)
+				if !ok {
+					continue
+				}
+				if value == message["messageId"].(float64) {
+					queue <- message
+					return
+				} else if key != "pending" && value == 0 && message["state"].(string) != "complete" {
+					c.activeMessages.Store(key, message["messageId"].(float64))
+					queue <- message
+					return
+				}
 			}
 		}
 	}

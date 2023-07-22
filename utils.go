@@ -32,7 +32,7 @@ func GetTextStream(ch <-chan map[string]interface{}) <-chan string {
 	return stream
 }
 
-func generatePayload(queryName string, variables map[string]interface{}) interface{} {
+func generatePayload(queryName string, variables interface{}) interface{} {
 	if queryName == "recv" {
 		if rand.Float64() > 0.9 {
 			return []map[string]interface{}{
@@ -60,12 +60,16 @@ func generatePayload(queryName string, variables map[string]interface{}) interfa
 			}
 		}
 	}
+	extension := "61c1bfa1ba167fd0857e3f6eaf9699e847e6c3b09d69926b12b5390076fe36e6"
+	if queryName == "chatHelpers_sendMessageMutation_Mutation" {
+		extension = "5fd489242adf25bf399a95c6b16de9665e521b76618a97621167ae5e11e4bce4"
+	}
 	return &Payload{
 		// "query":     queries[queryName],
 		QueryName: queryName,
 		Variables: variables,
 		Extensions: map[string]interface{}{
-			"hash": "61c1bfa1ba167fd0857e3f6eaf9699e847e6c3b09d69926b12b5390076fe36e6",
+			"hash": extension,
 		},
 	}
 }
