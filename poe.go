@@ -47,7 +47,7 @@ type Client struct {
 	requestCount   atomic.Int64
 }
 
-func NewClient(token string, proxy *url.URL) *Client {
+func NewClient(token string, proxy *url.URL) (*Client, error) {
 	// Initialize the client
 	client := &Client{
 		token:          token,
@@ -58,13 +58,18 @@ func NewClient(token string, proxy *url.URL) *Client {
 		messageQueues:  skipmap.NewString[chan map[string]interface{}](),
 	}
 	// Set up the session
-	client.setupSession(token)
-
+	err := client.setupSession(token)
+	if err != nil {
+		return nil, err
+	}
 	// Set up the connection
-	client.setupConnection()
+	err = client.setupConnection()
+	if err != nil {
+		return nil, err
+	}
 	client.connectWs()
 
-	return client
+	return client, nil
 }
 
 func (c *Client) GetBots() map[string]string {
@@ -90,13 +95,16 @@ func (c *Client) SendMessage(chatbot, message string, withChatBreak bool, timeou
 
 	if !c.wsConnected {
 		c.disconnectWs()
-		c.setupConnection()
+		err := c.setupConnection()
+		if err != nil {
+			return nil, err
+		}
 		c.connectWs()
 	}
 
 	chatID := c.getBotByCodename(chatbot)["chatId"].(float64)
 	//messageData :=
-	messageData := c.sendQuery("chatHelpers_sendMessageMutation_Mutation", &Message{
+	messageData, _ := c.sendQuery("chatHelpers_sendMessageMutation_Mutation", &Message{
 		ChatID: chatID,
 		Bot:    chatbot,
 		Query:  message,
@@ -129,7 +137,7 @@ func (c *Client) SendMessage(chatbot, message string, withChatBreak bool, timeou
 
 func (c *Client) SendChatBreak(chatbot string) (map[string]interface{}, error) {
 	log.Printf("Sending chat break to %s", chatbot)
-	result := c.sendQuery("AddMessageBreakMutation", map[string]interface{}{
+	result, _ := c.sendQuery("AddMessageBreakMutation", map[string]interface{}{
 		"chatId": c.getBotByCodename(chatbot)["chatId"],
 	}, 0)
 	return result["data"].(map[string]interface{})["messageBreakCreate"].(map[string]interface{})["message"].(map[string]interface{}), nil
@@ -174,7 +182,7 @@ func (c *Client) GetMessageHistory(chatbot string, count int, cursor interface{}
 		return messages, nil
 	}
 
-	result := c.sendQuery("ChatListPaginationQuery", map[string]interface{}{
+	result, _ := c.sendQuery("ChatListPaginationQuery", map[string]interface{}{
 		"count":  count,
 		"cursor": cursor,
 		"id":     c.getBotByCodename(chatbot)["id"].(string),
@@ -186,9 +194,12 @@ func (c *Client) GetMessageHistory(chatbot string, count int, cursor interface{}
 
 func (c *Client) DeleteMessage(messageIDs []int) error {
 	log.Printf("Deleting messages: %v", messageIDs)
-	c.sendQuery("DeleteMessageMutation", map[string]interface{}{
+	_, err := c.sendQuery("DeleteMessageMutation", map[string]interface{}{
 		"messageIds": messageIDs,
 	}, 0)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -231,14 +242,14 @@ func (c *Client) PurgeConversation(chatbot string, count int) error {
 	return nil
 }
 
-func (c *Client) CreateBot(req CreateBot) map[string]interface{} {
+func (c *Client) CreateBot(req CreateBot) (map[string]interface{}, error) {
 	if req.PromptPublic == nil {
 		req.PromptPublic = GetPoint[bool](true)
 	}
 	if req.MarkdownRendering == nil {
 		req.MarkdownRendering = GetPoint[bool](true)
 	}
-	result := c.sendQuery("PoeBotCreateMutation", map[string]interface{}{
+	result, _ := c.sendQuery("PoeBotCreateMutation", map[string]interface{}{
 		"baseBot":              req.BaseModel,
 		"displayName":          req.DisplayName,
 		"handle":               req.Handle,
@@ -258,20 +269,23 @@ func (c *Client) CreateBot(req CreateBot) map[string]interface{} {
 	}, 0)
 	data := getMap(getMap(result, "data"), "poeBotCreate")
 	if data["status"] != "success" {
-		panic(errors.New("Poe returned an error while trying to create a bot "))
+		return nil, errors.New("Poe returned an error while trying to create a bot ")
 	}
-	c.getBots(false)
-	return data
+	_, err := c.getBots(false)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
-func (c *Client) EditBot(botID string, req CreateBot) map[string]interface{} {
+func (c *Client) EditBot(botID string, req CreateBot) (map[string]interface{}, error) {
 	if req.PromptPublic == nil {
 		req.PromptPublic = GetPoint[bool](true)
 	}
 	if req.MarkdownRendering == nil {
 		req.MarkdownRendering = GetPoint[bool](true)
 	}
-	result := c.sendQuery("PoeBotEditMutation", map[string]interface{}{
+	result, _ := c.sendQuery("PoeBotEditMutation", map[string]interface{}{
 		"botId":                botID,
 		"baseBot":              req.BaseModel,
 		"displayName":          req.DisplayName,
@@ -292,10 +306,13 @@ func (c *Client) EditBot(botID string, req CreateBot) map[string]interface{} {
 	}, 0)
 	data := getMap(getMap(result, "data"), "poeBotEdit")
 	if data["status"] != "success" {
-		panic(errors.New("Poe returned an error while trying to create a bot "))
+		return nil, errors.New("Poe returned an error while trying to create a bot ")
 	}
-	c.getBots(false)
-	return data
+	_, err := c.getBots(false)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func (c *Client) requestWithRetries(method string, url string, attempts int, data []byte, headers map[string][]string) (*fhttp.Response, error) {
@@ -347,7 +364,7 @@ func (c *Client) requestWithRetries(method string, url string, attempts int, dat
 	return nil, fmt.Errorf("failed to download %s too many times", url)
 }
 
-func (c *Client) setupSession(token string) {
+func (c *Client) setupSession(token string) error {
 	// Set up the session with the provided token and proxy
 	jar := tls_client.NewCookieJar()
 	options := []tls_client.HttpClientOption{
@@ -360,12 +377,15 @@ func (c *Client) setupSession(token string) {
 	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
 	if err != nil {
 		log.Println(err)
-		return
+		return nil
 	}
 	c.session = client
 
 	if c.proxy != nil {
-		c.session.SetProxy(c.proxy.String())
+		err := c.session.SetProxy(c.proxy.String())
+		if err != nil {
+			return err
+		}
 		log.Printf("Proxy enabled: %s\n", c.proxy.String())
 	}
 
@@ -394,18 +414,23 @@ func (c *Client) setupSession(token string) {
 		Domain: "poe.com",
 	}
 
-	url, err := url.Parse(homeURL)
+	uri, err := url.Parse(homeURL)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	c.session.SetCookies(url, []*fhttp.Cookie{cookie})
+	c.session.SetCookies(uri, []*fhttp.Cookie{cookie})
+	return nil
 }
 
-func (c *Client) setupConnection() {
+func (c *Client) setupConnection() error {
 	c.wsDomain = fmt.Sprintf("tch%d", rand.Intn(1000000))
-	c.nextData = c.getNextData(true)
-	c.channel = c.getChannelData()
-	c.bots = c.getBots(false)
+	nextData, err := c.getNextData(true)
+	if err != nil {
+		return err
+	}
+	c.nextData = nextData
+	c.channel, _ = c.getChannelData()
+	c.bots, _ = c.getBots(false)
 	c.botNames = c.getBotNames()
 
 	if c.deviceID == "" {
@@ -422,6 +447,7 @@ func (c *Client) setupConnection() {
 	}
 
 	c.subscribe()
+	return nil
 }
 
 func (c *Client) getDeviceID() string {
@@ -450,21 +476,32 @@ func (c *Client) extractFormKey(html string) string {
 	return formKey
 }
 
-func (c *Client) getNextData(overwriteVars bool) map[string]interface{} {
+func (c *Client) getNextData(overwriteVars bool) (map[string]interface{}, error) {
 	resp, err := c.requestWithRetries(http.MethodGet, homeURL, 0, nil, nil)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Error closing response body: %s", err)
+		}
+	}(resp.Body)
+
 	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
 
 	jsonRegex := regexp.MustCompile(`<script id="__NEXT_DATA__" type="application\/json">(.+?)</script>`)
 	jsonText := jsonRegex.FindStringSubmatch(string(body))[1]
 
 	var nextData map[string]interface{}
 	err = json.Unmarshal([]byte(jsonText), &nextData)
-
+	if err != nil {
+		return nil, err
+	}
 	if overwriteVars {
 		c.formKey = c.extractFormKey(string(body))
 		if containKey("payload", nextData["props"].(map[string]interface{})["pageProps"].(map[string]interface{})) {
@@ -476,7 +513,7 @@ func (c *Client) getNextData(overwriteVars bool) map[string]interface{} {
 		c.nextData = nextData
 	}
 
-	return nextData
+	return nextData, nil
 }
 
 func (c *Client) getBot(displayName string) map[string]interface{} {
@@ -502,9 +539,9 @@ func (c *Client) getBot(displayName string) map[string]interface{} {
 	return chatData
 }
 
-func (c *Client) getBots(downloadNextData bool) map[string]interface{} {
+func (c *Client) getBots(downloadNextData bool) (map[string]interface{}, error) {
 	if _, ok := c.viewer["availableBotsConnection"]; !ok {
-		panic("Invalid token or no bots are available.")
+		return nil, errors.New("invalid token or no bots are available")
 	}
 	botList := c.viewer["availableBotsConnection"].(map[string]interface{})["edges"].([]interface{})
 
@@ -528,7 +565,7 @@ func (c *Client) getBots(downloadNextData bool) map[string]interface{} {
 
 	c.bots = bots
 	c.botNames = c.getBotNames()
-	return bots
+	return bots, nil
 }
 
 func (c *Client) getBotByCodename(botCodename string) map[string]interface{} {
@@ -550,7 +587,7 @@ func (c *Client) getBotNames() map[string]string {
 	return result
 }
 
-func (c *Client) exploreBots(endCursor *string, count int) map[string]interface{} {
+func (c *Client) exploreBots(endCursor *string, count int) (map[string]interface{}, error) {
 	var url string
 	var resp *fhttp.Response
 	var err error
@@ -564,7 +601,7 @@ func (c *Client) exploreBots(endCursor *string, count int) map[string]interface{
 			"count":  count,
 			"cursor": *endCursor,
 		}
-		result := c.sendQuery("ExploreBotsListPaginationQuery", queryData, 0)
+		result, _ := c.sendQuery("ExploreBotsListPaginationQuery", queryData, 0)
 		resultData := result["data"].(map[string]interface{})["exploreBotsConnection"].(map[string]interface{})
 
 		bots := make([]map[string]interface{}, len(resultData["edges"].([]interface{})))
@@ -575,19 +612,27 @@ func (c *Client) exploreBots(endCursor *string, count int) map[string]interface{
 		return map[string]interface{}{
 			"bots":       bots,
 			"end_cursor": resultData["pageInfo"].(map[string]interface{})["endCursor"],
-		}
+		}, nil
 	}
 
 	// Handle error in HTTP response
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 
+	if err != nil {
+		return nil, err
+	}
+
 	var jsonData map[string]interface{}
 	err = json.Unmarshal(body, &jsonData)
+
+	if err != nil {
+		return nil, err
+	}
 
 	nodes := jsonData["pageProps"].(map[string]interface{})["payload"].(map[string]interface{})["exploreBotsConnection"].(map[string]interface{})["edges"].([]interface{})
 	bots := make([]map[string]interface{}, len(nodes))
@@ -598,7 +643,7 @@ func (c *Client) exploreBots(endCursor *string, count int) map[string]interface{
 	return map[string]interface{}{
 		"bots":       bots[:count],
 		"end_cursor": jsonData["pageProps"].(map[string]interface{})["payload"].(map[string]interface{})["exploreBotsConnection"].(map[string]interface{})["pageInfo"].(map[string]interface{})["endCursor"],
-	}
+	}, nil
 }
 
 func (c *Client) getRemainingMessages(chatbot string) int {
@@ -606,21 +651,25 @@ func (c *Client) getRemainingMessages(chatbot string) int {
 	return int(chatData["defaultBotObject"].(map[string]interface{})["messageLimit"].(map[string]interface{})["numMessagesRemaining"].(float64))
 }
 
-func (c *Client) getChannelData() map[string]interface{} {
+func (c *Client) getChannelData() (map[string]interface{}, error) {
 	log.Println("Downloading channel data...")
 	resp, err := c.requestWithRetries(http.MethodGet, settingsURL, 0, nil, nil)
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
-
+	if err != nil {
+		return nil, err
+	}
 	var jsonData map[string]interface{}
 	err = json.Unmarshal(body, &jsonData)
-
-	return jsonData["tchannelData"].(map[string]interface{})
+	if err != nil {
+		return nil, err
+	}
+	return jsonData["tchannelData"].(map[string]interface{}), nil
 }
 
 func (c *Client) getWebsocketURL(channel map[string]interface{}) string {
@@ -636,7 +685,7 @@ func (c *Client) getWebsocketURL(channel map[string]interface{}) string {
 	return fmt.Sprintf("wss://%s.tch.%s/up/%s/updates?min_seq=%s&channel=%s&hash=%s", c.wsDomain, baseHost, boxName, minSeq, channelName, hash)
 }
 
-func (c *Client) sendQuery(queryName string, variables interface{}, attempts int) map[string]interface{} {
+func (c *Client) sendQuery(queryName string, variables interface{}, attempts int) (map[string]interface{}, error) {
 	if attempts == 0 {
 		attempts = 10
 	}
@@ -660,13 +709,13 @@ func (c *Client) sendQuery(queryName string, variables interface{}, attempts int
 				//panic(err)
 				log.Println(err)
 			}
-			return nil
+			return nil, nil
 		}
 		resp, err := c.requestWithRetries(http.MethodPost, gqlURL, attempts, payload, headers)
 
 		// Handle error in HTTP response
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		defer resp.Body.Close()
@@ -682,15 +731,16 @@ func (c *Client) sendQuery(queryName string, variables interface{}, attempts int
 			continue
 		}
 
-		return data
+		return data, nil
 	}
 
-	panic(fmt.Sprintf("%s failed too many times.", queryName))
+	//panic(fmt.Sprintf("%s failed too many times.", queryName))
+	return nil, errors.New(fmt.Sprintf("%s failed too many times.", queryName))
 }
 
 func (c *Client) subscribe() map[string]interface{} {
 	log.Println("Subscribing to mutations")
-	var result = c.sendQuery("subscriptionsMutation", &SubscriptionsMutation{
+	var result, _ = c.sendQuery("subscriptionsMutation", &SubscriptionsMutation{
 		Subscriptions: []Subscription{
 			{
 				SubscriptionName: "messageAdded",
@@ -901,6 +951,6 @@ func (c *Client) sendRecv(humanMessageID, chatbot, chatID string, textCh chan st
 		} else {
 			m["bot_message_id"] = id
 		}
-		c.sendQuery("recv", m, 0)
+		_, _ = c.sendQuery("recv", m, 0)
 	}
 }

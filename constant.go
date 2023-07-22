@@ -33,7 +33,8 @@ var headers = fhttp.Header{
 	// "Te":                        []string{"trailers"},
 	// "Upgrade-Insecure-Requests": []string{"1"},
 }
-var clientIdentifier = "firefox_102"
+
+//var clientIdentifier = "firefox_102"
 
 func init() {
 	loadQueries()
