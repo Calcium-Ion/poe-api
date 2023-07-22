@@ -9,3 +9,9 @@ type Subscription struct {
 	Query            interface{} `json:"query"`
 	QueryHash        string      `json:"queryHash"`
 }
+
+type Payload struct {
+	QueryName  string                 `json:"queryName"`
+	Variables  map[string]interface{} `json:"variables"`
+	Extensions map[string]interface{} `json:"extensions"`
+}
