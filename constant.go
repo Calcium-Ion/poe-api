@@ -26,12 +26,12 @@ var logger = log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lshortfile)
 
 var userAgent = "This will be ignored! See the README for info on how to set custom headers."
 var headers = fhttp.Header{
-	"User-Agent":                []string{"Mozilla/5.0 (X11; Linux x86_64; rv:102.0) Gecko/20100101 Firefox/102.0"},
-	"Accept":                    []string{"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"},
-	"Accept-Encoding":           []string{"gzip, deflate, br"},
-	"Accept-Language":           []string{"en-US,en;q=0.5"},
-	"Te":                        []string{"trailers"},
-	"Upgrade-Insecure-Requests": []string{"1"},
+	"User-Agent": []string{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82"},
+	"Accept":     []string{"text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"},
+	// "Accept-Encoding":           []string{"gzip, deflate, br"},
+	// "Accept-Language":           []string{"en-US,en;q=0.5"},
+	// "Te":                        []string{"trailers"},
+	// "Upgrade-Insecure-Requests": []string{"1"},
 }
 var clientIdentifier = "firefox_102"
 

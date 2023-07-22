@@ -293,7 +293,7 @@ func (c *Client) EditBot(botID string, req CreateBot) map[string]interface{} {
 
 func (c *Client) requestWithRetries(method string, url string, attempts int, data []byte, headers map[string][]string) (*fhttp.Response, error) {
 	if attempts == 0 {
-		attempts = 10
+		attempts = 3
 	}
 	client := c.session
 	var payload io.Reader
@@ -326,6 +326,13 @@ func (c *Client) requestWithRetries(method string, url string, attempts int, dat
 			}
 			fmt.Println(body)
 		}
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == 400 {
+			// print the response body
+			body, _ := io.ReadAll(resp.Body)
+			fmt.Println(string(body))
+			fmt.Println(req.Header)
+			fmt.Println(string(data))
+		}
 		logger.Printf("Server returned a status code of %d while downloading %s. Retrying (%d/%d)...", resp.StatusCode, url, i+1, attempts)
 		time.Sleep(time.Second)
 	}
@@ -338,8 +345,8 @@ func (c *Client) setupSession(token string) {
 	jar := tls_client.NewCookieJar()
 	options := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(30),
-		tls_client.WithClientProfile(tls_client.Firefox_102),
-		tls_client.WithNotFollowRedirects(),
+		tls_client.WithClientProfile(tls_client.Okhttp4Android13),
+		// tls_client.WithNotFollowRedirects(),
 		tls_client.WithCookieJar(jar), // create cookieJar instance and pass it as argument
 	}
 
@@ -356,13 +363,20 @@ func (c *Client) setupSession(token string) {
 	}
 
 	// Update session headers
-	c.headers.Set("Referrer", "https://poe.com/")
-	c.headers.Set("Origin", "https://poe.com")
-	c.headers.Set("Host", "poe.com")
-	c.headers.Set("Sec-Fetch-Dest", "empty")
-	c.headers.Set("Sec-Fetch-Mode", "cors")
-	c.headers.Set("Sec-Fetch-Site", "same-origin")
-	c.headers.Set("Client-Identifier", clientIdentifier)
+	// c.headers.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82")
+	// c.headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+	// c.headers.Set("Referrer", "https://poe.com/")
+	// c.headers.Set("Origin", "https://poe.com")
+	// c.headers.Set("Host", "poe.com")
+	// c.headers.Set("Cache-Control", "no-cache")
+	// c.headers.Set("Sec-Fetch-Dest", "document")
+	// c.headers.Set("Sec-Ch-Ua-Platform", "\"MacOS\"")
+	// c.headers.Set("Sec-Fetch-Mode", "navigate")
+	// c.headers.Set("Sec-Fetch-Site", "same-origin")
+	// c.headers.Set("Sec-Fetch-User", "?1")
+	// c.headers.Set("Sec-Ch-Ua", "\"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"114\", \"Microsoft Edge\";v=\"114\"")
+	// c.headers.Set("Client-Identifier", "chrome114")
+	// log.Println(c.headers)
 	for key, value := range headers {
 		c.headers[key] = value
 	}
@@ -372,6 +386,7 @@ func (c *Client) setupSession(token string) {
 		Value:  token,
 		Domain: "poe.com",
 	}
+
 	url, err := url.Parse(homeURL)
 	if err != nil {
 		panic(err)
@@ -392,6 +407,7 @@ func (c *Client) setupConnection() {
 
 	c.gqlHeaders = make(http.Header)
 	c.gqlHeaders.Set("poe-formkey", c.formKey)
+	// c.gqlHeaders.Set("Poe-Tag-Id", "ccb25cfc4ed7004c8ed68f5fa0a8760b")
 	c.gqlHeaders.Set("poe-tchannel", c.channel["channel"].(string))
 
 	for k, v := range c.headers {
@@ -623,8 +639,8 @@ func (c *Client) sendQuery(queryName string, variables map[string]interface{}, a
 		baseString := string(payload) + c.gqlHeaders["Poe-Formkey"][0] + "WpuLMiXEKKE98j56k"
 
 		headers := map[string][]string{
-			"content-type": {"application/json"},
-			"poe-tag-id":   {fmt.Sprintf("%x", md5.Sum([]byte(baseString)))},
+			"Content-Type": {"application/json"},
+			"Poe-Tag-Id":   {fmt.Sprintf("%x", md5.Sum([]byte(baseString)))},
 		}
 
 		for k, v := range c.gqlHeaders {
@@ -633,7 +649,8 @@ func (c *Client) sendQuery(queryName string, variables map[string]interface{}, a
 		if queryName == "recv" {
 			_, err := c.requestWithRetries(http.MethodPost, gqlRecvURL, attempts, payload, headers)
 			if err != nil {
-				panic(err)
+				//panic(err)
+				log.Println(err)
 			}
 			return nil
 		}
@@ -664,15 +681,32 @@ func (c *Client) sendQuery(queryName string, variables map[string]interface{}, a
 
 func (c *Client) subscribe() map[string]interface{} {
 	log.Println("Subscribing to mutations")
-	result := c.sendQuery("SubscriptionsMutation", map[string]interface{}{
-		"subscriptions": []map[string]interface{}{
+	var result = c.sendQuery("subscriptionsMutation", map[string]interface{}{
+		"subscriptions": []Subscription{
 			{
-				"subscriptionName": "messageAdded",
-				"query":            queries["MessageAddedSubscription"],
+				SubscriptionName: "messageAdded",
+				Query:            nil,
+				QueryHash:        "343d50a327e93b9104af175f1320fe157a377f1dbb33eaeb18c6a95a11d1b512",
 			},
 			{
-				"subscriptionName": "viewerStateUpdated",
-				"query":            queries["ViewerStateUpdatedSubscription"],
+				SubscriptionName: "messageCancelled",
+				Query:            nil,
+				QueryHash:        "dfcedd9e0304629c22929725ff6544e1cb32c8f20b0c3fd54d966103ccbcf9d3",
+			},
+			{
+				SubscriptionName: "messageDeleted",
+				Query:            nil,
+				QueryHash:        "91f1ea046d2f3e21dabb3131898ec3c597cb879aa270ad780e8fdd687cde02a3",
+			},
+			{
+				SubscriptionName: "viewerStateUpdated",
+				Query:            nil,
+				QueryHash:        "ee640951b5670b559d00b6928e20e4ac29e33d225237f5bdfcb043155f16ef54",
+			},
+			{
+				SubscriptionName: "chatTitleUpdated",
+				Query:            nil,
+				QueryHash:        "6875d78f384e5d31bcaf3a14b847b6918d51691a70cb6a17a000cba70ef53907",
 			},
 		},
 	}, 0)
@@ -822,6 +856,12 @@ func (c *Client) dealMessage(humanMessageID string, textCh chan string, result c
 }
 
 func (c *Client) sendRecv(humanMessageID, chatbot, chatID string, textCh chan string) {
+	//recovers from panic
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic: %v", r)
+		}
+	}()
 	for text := range textCh {
 		m := map[string]interface{}{
 			"bot":                                 chatbot,

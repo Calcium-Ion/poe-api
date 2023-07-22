@@ -61,9 +61,12 @@ func generatePayload(queryName string, variables map[string]interface{}) interfa
 		}
 	}
 	return map[string]interface{}{
-		"query":     queries[queryName],
+		// "query":     queries[queryName],
 		"queryName": queryName,
 		"variables": variables,
+		"extensions": map[string]interface{}{
+			"hash": "61c1bfa1ba167fd0857e3f6eaf9699e847e6c3b09d69926b12b5390076fe36e6",
+		},
 	}
 }
 
