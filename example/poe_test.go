@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lwydyby/poe-api"
+	"github.com/Calcium-Ion/poe-api"
 )
 
 func ExampleSendMessage() {

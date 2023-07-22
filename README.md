@@ -14,7 +14,7 @@ This will help streamline the process and ensure that updates are efficiently im
 ## install
 
 ```bash
-go get github.com/lwydyby/poe-api
+go get github.com/Calcium-Ion/poe-api
 ```
 
 ## use
@@ -25,7 +25,7 @@ import (
 "fmt"
 "time"
 
-"github.com/lwydyby/poe-api"
+"github.com/Calcium-Ion/poe-api"
 )
 
 

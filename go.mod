@@ -1,4 +1,4 @@
-module github.com/lwydyby/poe-api
+module github.com/Calcium-Ion/poe-api
 
 go 1.20
 
