@@ -9,7 +9,7 @@ import (
 )
 
 func ExampleSendMessage() {
-	c, err := poe_api.NewClient("", nil)
+	c, err := poe_api.NewClient("your p-b", "your formkey", nil)
 	if err != nil {
 		log.Printf("failed to create client: %v", err)
 	}

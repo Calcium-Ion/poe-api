@@ -47,7 +47,7 @@ type Client struct {
 	requestCount   atomic.Int64
 }
 
-func NewClient(token string, proxy *url.URL) (*Client, error) {
+func NewClient(token string, formKey string, proxy *url.URL) (*Client, error) {
 	// Initialize the client
 	client := &Client{
 		token:          token,
@@ -63,7 +63,7 @@ func NewClient(token string, proxy *url.URL) (*Client, error) {
 		return nil, err
 	}
 	// Set up the connection
-	err = client.setupConnection()
+	err = client.setupConnection(formKey)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (c *Client) SendMessage(chatbot, message string, withChatBreak bool, timeou
 
 	if !c.wsConnected {
 		c.disconnectWs()
-		err := c.setupConnection()
+		err := c.setupConnection(c.formKey)
 		if err != nil {
 			return nil, err
 		}
@@ -424,9 +424,9 @@ func (c *Client) setupSession(token string) error {
 	return nil
 }
 
-func (c *Client) setupConnection() error {
+func (c *Client) setupConnection(formKey string) error {
 	c.wsDomain = fmt.Sprintf("tch%d", rand.Intn(1000000))
-	nextData, err := c.getNextData(true)
+	nextData, err := c.getNextData(true, formKey)
 	if err != nil {
 		return err
 	}
@@ -485,28 +485,17 @@ func (c *Client) extractFormKey(html string) string {
 	functionText := functionRegex.FindStringSubmatch(scriptText)[1]
 	scriptText += functionText + "();"
 
-	//rt := quickjs.NewRuntime()
-	//defer rt.Close()
-	//
-	//// Create a new context
-	//ctx := rt.NewContext()
-	//defer ctx.Close()
-	//formkey, err := ctx.Eval(scriptText)
-	//if err != nil {
-	//	log.Printf("Error evaluating script: %s", err)
-	//	return ""
-	//}
 	rt := goja.New()
 	formkey, err := rt.RunString(scriptText)
 	if err != nil {
 		log.Printf("Error evaluating script: %s", err)
 		return ""
 	}
-	log.Printf("Formkey: %s", formkey.String())
+	//log.Printf("Formkey: %s", formkey.String())
 	return formkey.String()
 }
 
-func (c *Client) getNextData(overwriteVars bool) (map[string]interface{}, error) {
+func (c *Client) getNextData(overwriteVars bool, formKey string) (map[string]interface{}, error) {
 	resp, err := c.requestWithRetries(http.MethodGet, homeURL, 0, nil, nil)
 	if err != nil {
 		return nil, err
@@ -533,7 +522,12 @@ func (c *Client) getNextData(overwriteVars bool) (map[string]interface{}, error)
 		return nil, err
 	}
 	if overwriteVars {
-		c.formKey = c.extractFormKey(string(body))
+		if formKey == "" {
+			c.formKey = c.extractFormKey(string(body))
+		} else {
+			c.formKey = formKey
+		}
+		log.Printf("Formkey: %s", c.formKey)
 		//log.Printf("NextData: %s", jsonText)
 
 		if containKey("payload", nextData["props"].(map[string]interface{})["pageProps"].(map[string]interface{})) {
