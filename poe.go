@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/dop251/goja"
 	"io"
 	"log"
 	"math"
@@ -13,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,6 +78,8 @@ func (c *Client) GetBots() map[string]string {
 
 func (c *Client) SendMessage(chatbot, message string, withChatBreak bool, timeout time.Duration) (<-chan map[string]interface{}, error) {
 	// 支持通过name获取chatbot 而不需要拿到poe后端需要的name
+	//log.Printf("Bots: %v", c)
+
 	if name, ok := c.botNames[chatbot]; ok {
 		chatbot = name
 	}
@@ -353,9 +355,9 @@ func (c *Client) requestWithRetries(method string, url string, attempts int, dat
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == 400 {
 			// print the response body
 			body, _ := io.ReadAll(resp.Body)
-			fmt.Println(string(body))
-			fmt.Println(req.Header)
-			fmt.Println(string(data))
+			logger.Println(string(body))
+			logger.Println(req.Header)
+			logger.Println(string(data))
 		}
 		logger.Printf("Server returned a status code of %d while downloading %s. Retrying (%d/%d)...", resp.StatusCode, url, i+1, attempts)
 		time.Sleep(time.Second)
@@ -458,22 +460,50 @@ func (c *Client) getDeviceID() string {
 }
 
 func (c *Client) extractFormKey(html string) string {
-	scriptRegex := regexp.MustCompile(`<script>if\(.+\)throw new Error;(.+)</script>`)
-	scriptText := scriptRegex.FindStringSubmatch(html)[1]
-	keyRegex := regexp.MustCompile(`var .="([0-9a-f]+)",`)
-	keyText := keyRegex.FindStringSubmatch(scriptText)[1]
-	cipherRegex := regexp.MustCompile(`.\[(\d+)\]=.\[(\d+)\]`)
-	cipherPairs := cipherRegex.FindAllStringSubmatch(scriptText, -1)
-
-	formKeyList := make([]string, len(cipherPairs))
-	for _, pair := range cipherPairs {
-		formKeyIndex, _ := strconv.Atoi(pair[1])
-		keyIndex, _ := strconv.Atoi(pair[2])
-		formKeyList[formKeyIndex] = string(keyText[keyIndex])
+	scriptRegex := regexp.MustCompile(`<script>(.+?)</script>`)
+	scriptText := `
+      let QuickJS = undefined, process = undefined;
+      let window = new Proxy({
+        document: {a:1},
+        navigator: {a:1}
+      },{
+        get(obj, prop) {
+          return obj[prop] || true;
+        },
+        set(obj, prop, value) {
+          obj[prop] = value;
+          return true;
+        }
+      });
+    `
+	matches := scriptRegex.FindAllStringSubmatch(html, -1)
+	for _, match := range matches {
+		scriptText += match[1]
 	}
-	formKey := strings.Join(formKeyList, "")
 
-	return formKey
+	functionRegex := regexp.MustCompile(`(window\.[a-zA-Z0-9]{17})=function`)
+	functionText := functionRegex.FindStringSubmatch(scriptText)[1]
+	scriptText += functionText + "();"
+
+	//rt := quickjs.NewRuntime()
+	//defer rt.Close()
+	//
+	//// Create a new context
+	//ctx := rt.NewContext()
+	//defer ctx.Close()
+	//formkey, err := ctx.Eval(scriptText)
+	//if err != nil {
+	//	log.Printf("Error evaluating script: %s", err)
+	//	return ""
+	//}
+	rt := goja.New()
+	formkey, err := rt.RunString(scriptText)
+	if err != nil {
+		log.Printf("Error evaluating script: %s", err)
+		return ""
+	}
+	log.Printf("Formkey: %s", formkey.String())
+	return formkey.String()
 }
 
 func (c *Client) getNextData(overwriteVars bool) (map[string]interface{}, error) {
@@ -504,10 +534,15 @@ func (c *Client) getNextData(overwriteVars bool) (map[string]interface{}, error)
 	}
 	if overwriteVars {
 		c.formKey = c.extractFormKey(string(body))
+		//log.Printf("NextData: %s", jsonText)
+
 		if containKey("payload", nextData["props"].(map[string]interface{})["pageProps"].(map[string]interface{})) {
 			c.viewer = nextData["props"].(map[string]interface{})["pageProps"].(map[string]interface{})["payload"].(map[string]interface{})["viewer"].(map[string]interface{})
 		} else {
 			c.viewer = nextData["props"].(map[string]interface{})["pageProps"].(map[string]interface{})["data"].(map[string]interface{})["viewer"].(map[string]interface{})
+		}
+		if c.viewer["poeUser"] == nil {
+			return nil, errors.New("invalid token or no bots are available")
 		}
 		c.userID = c.viewer["poeUser"].(map[string]interface{})["id"].(string)
 		c.nextData = nextData

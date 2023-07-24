@@ -1,13 +1,8 @@
 # Golang Poe API
-The golang version of https://github.com/ading2210/poe-api, used for the golang project to call poe api
-
-
-The latest commit that is currently compatible is https://github.com/ading2210/poe-api/tree/7470d07b989af596293f24d0bcfc6315161505e0
+https://github.com/ading2210/poe-api 的golang版本
 
 # Notice
-As a single person, it can be challenging to keep up with the frequent API definition changes made by Poe in the ading2210/poe-api project. Therefore, 
-welcome those with the necessary skills to contribute by submitting modifications directly via MR, rather than forking the code. 
-This will help streamline the process and ensure that updates are efficiently implemented.
+Fork from https://github.com/lwydyby/poe-api, 在此基础上进行了一些修改，并修复了一些bug
 
 # Instructions
 
@@ -22,29 +17,33 @@ go get github.com/Calcium-Ion/poe-api
 ```golang
 
 import (
-"fmt"
-"time"
-
-"github.com/Calcium-Ion/poe-api"
+    "fmt"
+    "log"
+    "time"
+    
+    "github.com/Calcium-Ion/poe-api"
 )
 
 
 func ExampleSendMessage() {
-	c := poe_api.NewClient("", nil)
-	res, err := c.SendMessage("ChatGPT", "一句话描述golang的channel", true, 30*time.Second)
-	if err != nil {
-		panic(err)
-	}
-	// 等待全部返回后 直接返回全文
-	fmt.Println(poe_api.GetFinalResponse(res))
+    c, err := poe_api.NewClient("", nil)
+    if err != nil {
+    log.Printf("failed to create client: %v", err)
+    }
+	
+    res, err := c.SendMessage("ChatGPT", "一句话描述golang的channel", true, 30*time.Second)
+    if err != nil {
+        log.Printf("failed to send message: %v", err)
+    }
+    fmt.Println(poe_api.GetFinalResponse(res))
+	
 	res, err = c.SendMessage("ChatGPT", "channel是并发安全的吗", false, 30*time.Second)
-	if err != nil {
-		panic(err)
-	}
+    if err != nil {
+        log.Printf("failed to send message: %v", err)
+    }
 	// 流式返回 每次返回新增的数据
 	for m := range poe_api.GetTextStream(res) {
 		fmt.Println(m)
 	}
-	// output: 
 }
 ```
